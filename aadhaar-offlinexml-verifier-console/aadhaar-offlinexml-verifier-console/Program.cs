@@ -1,6 +1,3 @@
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.X509;
 using System;
 using System.IO;
 using System.IO.Compression;
@@ -8,6 +5,9 @@ using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Xml;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Security;
+using Org.BouncyCastle.X509;
 
 namespace aadhaar_offlinexml_verifier_console
 {
@@ -17,86 +17,23 @@ namespace aadhaar_offlinexml_verifier_console
         {
             Console.WriteLine("Aadhaar Offline XML Verifier");
             
+            if (args.Length > 0 && (args[0] == "-h" || args[0] == "--help"))
+            {
+                DisplayHelp();
+                return;
+            }
+            
             string xmlFilePath = string.Empty;
             string keyFilePath = string.Empty;
-            string zipFilePath = string.Empty;
-            string zipPassword = string.Empty;
             
             // Check if arguments are provided
             if (args.Length > 0)
             {
-                string inputPath = args[0];
-                
-                if (Path.GetExtension(inputPath).ToLower() == ".zip")
-                {
-                    zipFilePath = inputPath;
-                    
-                    // If password is provided as second argument
-                    if (args.Length > 1)
-                    {
-                        zipPassword = args[1];
-                    }
-                    else
-                    {
-                        Console.Write("Enter ZIP password (first 4 letters of name + YYYY): ");
-                        zipPassword = Console.ReadLine();
-                    }
-                    
-                    // Extract files from ZIP
-                    var extractedFiles = ExtractAadhaarZip(zipFilePath, zipPassword);
-                    xmlFilePath = extractedFiles.XmlPath;
-                    keyFilePath = extractedFiles.CertPath;
-                }
-                else if (Path.GetExtension(inputPath).ToLower() == ".xml")
-                {
-                    xmlFilePath = inputPath;
-                    
-                    // If certificate path is provided as second argument
-                    if (args.Length > 1)
-                    {
-                        keyFilePath = args[1];
-                    }
-                    else
-                    {
-                        Console.Write("Enter certificate file path: ");
-                        keyFilePath = Console.ReadLine();
-                    }
-                }
+                ProcessCommandLineArgs(args, ref xmlFilePath, ref keyFilePath);
             }
             else
             {
-                Console.WriteLine("1. Verify XML file with certificate");
-                Console.WriteLine("2. Process Aadhaar ZIP file");
-                Console.Write("Choose option (1/2): ");
-                
-                string option = Console.ReadLine();
-                
-                if (option == "1")
-                {
-                    Console.Write("Enter XML file path: ");
-                    xmlFilePath = Console.ReadLine();
-                    
-                    Console.Write("Enter certificate file path: ");
-                    keyFilePath = Console.ReadLine();
-                }
-                else if (option == "2")
-                {
-                    Console.Write("Enter ZIP file path: ");
-                    zipFilePath = Console.ReadLine();
-                    
-                    Console.Write("Enter ZIP password (first 4 letters of name + YYYY): ");
-                    zipPassword = Console.ReadLine();
-                    
-                    // Extract files from ZIP
-                    var extractedFiles = ExtractAadhaarZip(zipFilePath, zipPassword);
-                    xmlFilePath = extractedFiles.XmlPath;
-                    keyFilePath = extractedFiles.CertPath;
-                }
-                else
-                {
-                    Console.WriteLine("Invalid option selected.");
-                    return;
-                }
+                ProcessInteractiveMode(ref xmlFilePath, ref keyFilePath);
             }
             
             // Verify the XML signature
@@ -109,105 +46,69 @@ namespace aadhaar_offlinexml_verifier_console
             Console.ReadKey();
         }
         
-        static (string XmlPath, string CertPath) ExtractAadhaarZip(string zipPath, string password)
+        static void DisplayHelp()
         {
-            string tempDir = Path.Combine(Path.GetTempPath(), "AadhaarVerifier_" + Guid.NewGuid().ToString());
-            Directory.CreateDirectory(tempDir);
-            
-            Console.WriteLine($"Extracting ZIP file to temporary directory: {tempDir}");
-            
-            try
+            Console.WriteLine("Usage:");
+            Console.WriteLine("  aadhaar-offlinexml-verifier-console [options]");
+            Console.WriteLine("\nOptions:");
+            Console.WriteLine("  -h, --help                 Show this help message");
+            Console.WriteLine("  -x, --xml <path>           Path to XML file");
+            Console.WriteLine("  -c, --cert <path>          Path to certificate file");
+            Console.WriteLine("\nExamples:");
+            Console.WriteLine("  aadhaar-offlinexml-verifier-console -x data.xml -c cert.cer");
+            Console.WriteLine("  aadhaar-offlinexml-verifier-console data.xml cert.cer");
+        }
+        
+        static void ProcessCommandLineArgs(string[] args, ref string xmlFilePath, ref string keyFilePath)
+        {
+            // Process named arguments
+            for (int i = 0; i < args.Length; i++)
             {
-                // For password-protected ZIP, we need to use a different approach
-                // Since System.IO.Compression doesn't support passwords, we'll use a workaround
-                // by creating a temporary batch file to use 7-Zip if available
-                
-                if (!string.IsNullOrEmpty(password))
+                switch (args[i].ToLower())
                 {
-                    string sevenZipPath = FindSevenZipPath();
-                    
-                    if (!string.IsNullOrEmpty(sevenZipPath))
-                    {
-                        // Use 7-Zip to extract
-                        string batchFile = Path.Combine(Path.GetTempPath(), "extract_zip.bat");
-                        File.WriteAllText(batchFile, $"\"{sevenZipPath}\" x \"{zipPath}\" -o\"{tempDir}\" -p{password} -y");
-                        
-                        var process = new System.Diagnostics.Process
-                        {
-                            StartInfo = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = batchFile,
-                                UseShellExecute = false,
-                                CreateNoWindow = true
-                            }
-                        };
-                        
-                        process.Start();
-                        process.WaitForExit();
-                        
-                        File.Delete(batchFile);
-                    }
-                    else
-                    {
-                        Console.WriteLine("Warning: 7-Zip not found. Password-protected ZIP extraction may fail.");
-                        ZipFile.ExtractToDirectory(zipPath, tempDir);
-                    }
+                    case "-x":
+                    case "--xml":
+                        if (i + 1 < args.Length) xmlFilePath = args[++i];
+                        break;
+                    case "-c":
+                    case "--cert":
+                        if (i + 1 < args.Length) keyFilePath = args[++i];
+                        break;
                 }
-                else
-                {
-                    ZipFile.ExtractToDirectory(zipPath, tempDir);
-                }
-                
-                // Find XML and certificate files
-                string xmlFile = Directory.GetFiles(tempDir, "*.xml").FirstOrDefault();
-                string certFile = Directory.GetFiles(tempDir, "*.cer").FirstOrDefault();
-                
-                if (string.IsNullOrEmpty(xmlFile))
-                {
-                    throw new FileNotFoundException("XML file not found in the ZIP archive.");
-                }
-                
-                if (string.IsNullOrEmpty(certFile))
-                {
-                    // If certificate is not in the ZIP, use the default UIDAI certificate
-                    Console.WriteLine("Certificate not found in ZIP. Using default UIDAI certificate path.");
-                    certFile = "uidai_offline_publickey_19062019.cer";
-                    
-                    if (!File.Exists(certFile))
-                    {
-                        Console.Write("Enter certificate file path: ");
-                        certFile = Console.ReadLine();
-                    }
-                }
-                
-                Console.WriteLine($"Found XML file: {Path.GetFileName(xmlFile)}");
-                Console.WriteLine($"Using certificate: {Path.GetFileName(certFile)}");
-                
-                return (xmlFile, certFile);
             }
-            catch (Exception ex)
+            
+            // Legacy support for positional arguments
+            if (string.IsNullOrEmpty(xmlFilePath) && args.Length > 0)
             {
-                Console.WriteLine($"Error extracting ZIP: {ex.Message}");
-                throw;
+                string inputPath = args[0];
+                
+                if (Path.GetExtension(inputPath).ToLower() == ".xml")
+                {
+                    xmlFilePath = inputPath;
+                    
+                    // If certificate path is provided as second argument
+                    if (args.Length > 1 && string.IsNullOrEmpty(keyFilePath))
+                    {
+                        keyFilePath = args[1];
+                    }
+                }
+            }
+            
+            // Prompt for certificate if XML is provided but certificate is not
+            if (!string.IsNullOrEmpty(xmlFilePath) && string.IsNullOrEmpty(keyFilePath))
+            {
+                Console.Write("Enter certificate file path: ");
+                keyFilePath = Console.ReadLine();
             }
         }
         
-        static string FindSevenZipPath()
+        static void ProcessInteractiveMode(ref string xmlFilePath, ref string keyFilePath)
         {
-            string[] possiblePaths = {
-                @"C:\Program Files\7-Zip\7z.exe",
-                @"C:\Program Files (x86)\7-Zip\7z.exe"
-            };
+            Console.Write("Enter XML file path: ");
+            xmlFilePath = Console.ReadLine();
             
-            foreach (string path in possiblePaths)
-            {
-                if (File.Exists(path))
-                {
-                    return path;
-                }
-            }
-            
-            return null;
+            Console.Write("Enter certificate file path: ");
+            keyFilePath = Console.ReadLine();
         }
         
         static void VerifyXmlSignature(string xmlFilePath, string keyFilePath)
